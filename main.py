@@ -38,15 +38,71 @@ data_store = {
 }
 
 def clean_price(val: str) -> Optional[int]:
-    nums = re.sub(r"[^\d]", "", val)
+    if not val:
+        return None
+    val_clean = val.replace(",", "").strip()
+    if "الف" in val_clean or "ألف" in val_clean:
+        num_part = re.sub(r"[^\d.]", "", val_clean)
+        try:
+            return int(float(num_part) * 1000)
+        except:
+            return None
+    nums = re.sub(r"[^\d]", "", val_clean)
     return int(nums) if nums else None
+
+def scrape_gold_details(headers):
+    try:
+        search_url = "https://shafaq.com/ar/search?query=اسعار+الذهب"
+        res = requests.get(search_url, headers=headers, timeout=10)
+        if res.status_code != 200:
+            return
+
+        soup = BeautifulSoup(res.text, "html.parser")
+        gold_article_link = None
+        for a in soup.find_all("a", href=True):
+            if "الذهب" in a.get_text():
+                gold_article_link = a['href']
+                if not gold_article_link.startswith("http"):
+                    gold_article_link = "https://shafaq.com" + gold_article_link
+                break
+
+        if gold_article_link:
+            art_res = requests.get(gold_article_link, headers=headers, timeout=10)
+            if art_res.status_code == 200:
+                art_soup = BeautifulSoup(art_res.text, "html.parser")
+                text = art_soup.get_text()
+
+                gulf_match = re.search(r"(الخليجي|المستورد).*?بيع.*?([\d,]+(?:\s*(?:الف|ألف))?).*?شراء.*?([\d,]+(?:\s*(?:الف|ألف))?)", text)
+                if gulf_match:
+                    sell_val = clean_price(gulf_match.group(2))
+                    buy_val = clean_price(gulf_match.group(3))
+                    if sell_val and 400000 < sell_val < 900000:
+                        data_store["gold_rates"]["gulf_21"]["sell"] = sell_val
+                        data_store["gold_rates"]["gulf_21"]["buy"] = buy_val if buy_val else (sell_val - 10000)
+
+                iraqi_match = re.search(r"(العراقي).*?بيع.*?([\d,]+(?:\s*(?:الف|ألف))?).*?شراء.*?([\d,]+(?:\s*(?:الف|ألف))?)", text)
+                if iraqi_match:
+                    sell_val = clean_price(iraqi_match.group(2))
+                    buy_val = clean_price(iraqi_match.group(3))
+                    if sell_val and 350000 < sell_val < 850000:
+                        data_store["gold_rates"]["iraqi_21"]["sell"] = sell_val
+                        data_store["gold_rates"]["iraqi_21"]["buy"] = buy_val if buy_val else (sell_val - 10000)
+
+                if data_store["gold_rates"]["gulf_21"]["sell"] > 0:
+                    g21_sell = data_store["gold_rates"]["gulf_21"]["sell"] / 5.0
+                    g21_buy = data_store["gold_rates"]["gulf_21"]["buy"] / 5.0
+                    data_store["gold_rates"]["gram_24"]["sell"] = int((g21_sell / 21) * 24)
+                    data_store["gold_rates"]["gram_24"]["buy"] = int((g21_buy / 21) * 24)
+                    data_store["gold_rates"]["gram_18"]["sell"] = int((g21_sell / 21) * 18)
+                    data_store["gold_rates"]["gram_18"]["buy"] = int((g21_buy / 21) * 18)
+    except Exception as e:
+        print(f"Gold scraper warning: {e}")
 
 def auto_scrape_rates():
     global data_store
-    url = "https://shafaq.com/ar/اقتصـاد"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        res = requests.get(url, headers=headers, timeout=12)
+        res = requests.get("https://shafaq.com/ar/اقتصـاد", headers=headers, timeout=12)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
             text = soup.get_text()
@@ -85,27 +141,13 @@ def auto_scrape_rates():
                         data_store["markets"][city_key]["price"] = val
                         data_store["markets"][city_key]["sell"] = val + 350
                         data_store["markets"][city_key]["buy"] = val - 350
-
-            gold_gulf = re.search(r"(الخليجي|المستورد).*?([\d,]{6,7})", text)
-            gold_iraqi = re.search(r"(العراقي).*?([\d,]{6,7})", text)
-
-            if gold_gulf:
-                gp = clean_price(gold_gulf.group(2))
-                if gp and 400000 < gp < 800000:
-                    data_store["gold_rates"]["gulf_21"]["sell"] = gp
-                    data_store["gold_rates"]["gulf_21"]["buy"] = gp - 10000
-
-            if gold_iraqi:
-                ip = clean_price(gold_iraqi.group(2))
-                if ip and 350000 < ip < 750000:
-                    data_store["gold_rates"]["iraqi_21"]["sell"] = ip
-                    data_store["gold_rates"]["iraqi_21"]["buy"] = ip - 10000
-
-            data_store["last_updated"] = datetime.now().strftime("%Y-%m-%d %I:%M %p")
-            data_store["source_status"] = "synced_online"
-            print(f"[{datetime.now()}] تم تحديث أسعار المحافظات والذهب بنجاح.")
     except Exception as err:
-        print(f"Scrape error: {err}")
+        print(f"Currency scrape warning: {err}")
+
+    scrape_gold_details(headers)
+    data_store["last_updated"] = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    data_store["source_status"] = "synced_online"
+    print(f"[{datetime.now()}] تم تحديث أسعار الدولار والذهب بنجاح.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -133,6 +175,20 @@ def root():
 @app.get("/api/v1/rates")
 def get_rates():
     return data_store
+
+@app.post("/api/v1/gold/update")
+def manual_gold_update(gulf_sell: int, gulf_buy: int, iraqi_sell: int, iraqi_buy: int):
+    data_store["gold_rates"]["gulf_21"]["sell"] = gulf_sell
+    data_store["gold_rates"]["gulf_21"]["buy"] = gulf_buy
+    data_store["gold_rates"]["iraqi_21"]["sell"] = iraqi_sell
+    data_store["gold_rates"]["iraqi_21"]["buy"] = iraqi_buy
+    g21 = gulf_sell / 5.0
+    data_store["gold_rates"]["gram_24"]["sell"] = int((g21 / 21) * 24)
+    data_store["gold_rates"]["gram_24"]["buy"] = int(((gulf_buy / 5.0) / 21) * 24)
+    data_store["gold_rates"]["gram_18"]["sell"] = int((g21 / 21) * 18)
+    data_store["gold_rates"]["gram_18"]["buy"] = int(((gulf_buy / 5.0) / 21) * 18)
+    data_store["last_updated"] = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    return {"status": "updated", "gold_rates": data_store["gold_rates"]}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
