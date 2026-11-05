@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -28,26 +28,10 @@ data_store = {
     },
     "gold_rates": {
         "unit": "مثقال (5 غرامات)",
-        "gulf_21": {
-            "name": "مثقال عيار 21 (خليجي وتركي وأوروبي)",
-            "sell": 575000,
-            "buy": 565000
-        },
-        "iraqi_21": {
-            "name": "مثقال عيار 21 (عراقي)",
-            "sell": 545000,
-            "buy": 535000
-        },
-        "gram_24": {
-            "name": "غرام عيار 24",
-            "sell": 131500,
-            "buy": 129000
-        },
-        "gram_18": {
-            "name": "غرام عيار 18",
-            "sell": 98500,
-            "buy": 96000
-        }
+        "gulf_21": {"name": "مثقال عيار 21 (خليجي وتركي وأوروبي)", "sell": 575000, "buy": 565000},
+        "iraqi_21": {"name": "مثقال عيار 21 (عراقي)", "sell": 545000, "buy": 535000},
+        "gram_24": {"name": "غرام عيار 24", "sell": 131500, "buy": 129000},
+        "gram_18": {"name": "غرام عيار 18", "sell": 98500, "buy": 96000}
     },
     "official_rate": 151000,
     "source_status": "initialized"
@@ -58,18 +42,15 @@ def clean_price(val: str) -> Optional[int]:
     return int(nums) if nums else None
 
 def auto_scrape_rates():
-    """كشط أسعار الدولار والذهب في العراق"""
     global data_store
     url = "https://shafaq.com/ar/اقتصـاد"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    
     try:
         res = requests.get(url, headers=headers, timeout=12)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
             text = soup.get_text()
 
-            # مطابقة أسعار صرف الدولار
             cities_patterns = {
                 "erbil": r"اربيل.*?([\d,]{6,7})",
                 "basra": r"البصرة.*?([\d,]{6,7})",
@@ -105,7 +86,6 @@ def auto_scrape_rates():
                         data_store["markets"][city_key]["sell"] = val + 350
                         data_store["markets"][city_key]["buy"] = val - 350
 
-            # مطابقة أسعار الذهب (الخليجي والعراقي)
             gold_gulf = re.search(r"(الخليجي|المستورد).*?([\d,]{6,7})", text)
             gold_iraqi = re.search(r"(العراقي).*?([\d,]{6,7})", text)
 
@@ -123,9 +103,9 @@ def auto_scrape_rates():
 
             data_store["last_updated"] = datetime.now().strftime("%Y-%m-%d %I:%M %p")
             data_store["source_status"] = "synced_online"
-            print(f"[{datetime.now()}] تم تحديث بيانات العملات والذهب بنجاح.")
+            print(f"[{datetime.now()}] تم تحديث أسعار المحافظات والذهب بنجاح.")
     except Exception as err:
-        print(f"Scrape warning: {err}")
+        print(f"Scrape error: {err}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
